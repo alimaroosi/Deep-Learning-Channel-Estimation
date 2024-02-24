@@ -1,0 +1,167 @@
+# example of calculation 2d convolutions
+from this import d
+from turtle import shapesize
+from typing import Iterator
+# from matplotlib.cbook import flatten
+import math
+import numpy as np
+from numpy import asarray, dot
+from numpy import random
+from keras.models import Sequential
+from keras.layers import Conv2D
+from keras.layers import Dense
+from keras.layers import Flatten
+
+def awgn(signal,snr):
+    sigpower=np.sum(signal*np.conj(signal))
+    sigpower=sigpower/signal.size
+    noisepower=sigpower/(math.pow(10,snr/10))
+    if(np.iscomplex(signal[0][0])):
+        noise=math.sqrt(noisepower)* ( (np.random.randn(signal.shape[0],signal.shape[1]))+(np.random.randn(signal.shape[0],signal.shape[1])) *1j )
+    else:
+        noise=math.sqrt(noisepower)*(np.random.randn(signal.shape[0],signal.shape[1]))
+    sig_noise=signal+noise
+    return sig_noise
+
+# define input data
+data = [[0, 0, 0, 1.8, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1.2, 0, 0, 0],
+        [0, 0, 0, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1.5, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1.3, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1, 0, 0, 0],
+        [0, 0, 0, 1, 1.6, 0, 0, 0]]
+dim=4;
+nsample=100;
+H=random.rand(dim,dim)
+H=np.eye(4)
+H[1][1]=0.00005
+H[2][2]=0.0000000025
+H[3][3]= 1*np.exp(-16)
+print(H)
+xin= 2*random.randint(0,2,size=(dim,nsample))-1
+ych_NoNoise=np.dot(H,xin)
+snr=20
+ych=awgn(ych_NoNoise,snr)
+
+
+
+##### randomize or permutations samples
+Ind=np.random.permutation(nsample)
+ych_noSort=np.zeros(ych.shape)
+xin_noSort=np.zeros(xin.shape)
+for i, j in enumerate(Ind):
+    ych_noSort[:,i]=ych[:,j]
+    xin_noSort[:,i]= xin[:,j]
+
+####### divide data test train
+perc=0.7  ### percent of train data
+nTrain= np.floor(perc*nsample).astype('uint16')
+xTrain= ych_noSort[:,1:nTrain]
+yTrain=xin_noSort[:,1:nTrain]
+xTest= ych_noSort[:,nTrain+1:]
+yTest= xin_noSort[:,nTrain+1:]
+
+
+###accuracy with inverse
+Hinv=np.linalg.inv(H)
+yout_inv=np.dot(Hinv,xTest)
+# accuracy_inv=np.sum(np.equal(np.round(yout_inv),yTest))/yTest.size
+accuracy_inv=np.sum(np.equal(np.sign(yout_inv),yTest))/yTest.size
+print('accuracy_inv= ',accuracy_inv )
+
+############
+##########################reshape for image input  (numsample,channel,row, clmn )
+xTrain=np.transpose(xTrain).reshape(xTrain.shape[1],1,dim,1);
+xTest=np.transpose(xTest).reshape(xTest.shape[1],1,dim,1);
+yTrain=np.transpose(yTrain)
+yTest=np.transpose(yTest)
+#######
+print(xin)
+print(H)
+print(H.shape)
+data = asarray(data)
+# data = data.reshape(nsample, 1, dim, 1)
+# create model
+model = Sequential()
+model.add(Conv2D(dim, (1,dim), input_shape=(1, dim, 1),activation='linear', name='layer1Conv'))
+model.add(Flatten( name='layer2Flat'))
+# model.add(Dense(dim, activation='relu'))#'sigmoid'))  #'softmax'
+model.add(Dense(dim, activation='linear',name='layer3FC'))#'sigmoid'))  #'softmax'
+
+
+#########Set weights
+# #### prepare weights
+Hinv=np.linalg.inv(H)
+Hinv_T=np.transpose(Hinv)
+# print('Hinv_T')
+# print(Hinv_T)
+##Setting new weights and biases
+# for i, layer in enumerate(model.layers):
+#     if i==0:
+#         Weight = Hinv_T.reshape(layer.get_weights()[0].shape)
+#         layer.set_weights([Weight, np.zeros(layer.get_weights()[1].shape)])
+#     if i==2:
+#         Weight = np.eye(layer.get_weights()[0].shape[0],layer.get_weights()[0].shape[1])
+#         layer.set_weights([Weight, np.zeros(layer.get_weights()[1].shape)])
+
+
+for lys in model.layers:
+    print(lys.name,'/n')
+    print('wheight')
+    L=lys.get_weights()
+    try:
+        lys.get_weights()[0]
+        print("shape",lys.get_weights()[0].shape)
+        print(lys.get_weights()[0])
+        print('Bias')
+        print(lys.get_weights()[1])
+    except:
+        continue
+
+# xx=np.array([[  1],
+# [14],
+# [7]])
+# ychxx= np.dot(H,xx)
+# xTestxx=np.transpose(ychxx).reshape(1,1,dim,1);
+# youtxx=model.predict(xTestxx)
+
+# Compile model
+model.compile(optimizer='Adamax',loss='mse',metrics=['MeanSquaredError','accuracy']) ### nadam   0.001  #adam 0.02
+
+    # SGD  0.01
+    # RMSprop 0.03
+    # Adam
+    # Adadelta  0.5
+    # Adagrad  0.17
+    # Adamax 0.001
+    # Nadam 0.001
+    # Ftrl  0.8
+
+##model.compile(optimizer='rmsprop',loss='binary_crossentropy',metrics=['accuracy']) ## for multi class  loss='categorical_crossentropy'
+# This builds the model for the first time:
+
+model.fit(xTrain,yTrain,batch_size=100*dim, epochs=5000)
+
+for lys in model.layers:
+    print(lys.name,'/n')
+    print('wheight')
+    L=lys.get_weights()
+    try:
+        lys.get_weights()[0]
+        print("shape",lys.get_weights()[0].shape)
+        print(lys.get_weights()[0])
+        print('Bias')
+        print(lys.get_weights()[1])
+    except:
+        continue
+
+
+accuracyr = model.evaluate(xTrain ,yTrain, verbose=0)
+yout=model.predict(xTest)
+accuracy=np.sum(np.equal(np.sign(yout),yTest))/yTest.size
+print('accuracy=', accuracy)
+print('accuracy_inv= ',accuracy_inv )
+
+tt=0;

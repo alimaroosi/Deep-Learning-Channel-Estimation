@@ -1,0 +1,359 @@
+# example of calculation 2d convolutions
+from this import d
+from turtle import shapesize
+from typing import Iterator
+from Channel_Code import *
+# from matplotlib.cbook import flatten
+import math
+import numpy as np
+import keras as kr
+from numpy import asarray, dot, imag, ndenumerate
+from numpy import random
+from keras.models import Sequential
+from keras.layers import Conv2D, Flatten
+from keras.layers import Dense, Dropout
+from keras.layers import Flatten
+from keras.layers import Input
+from keras.layers import Subtract
+from keras.layers import add
+from keras.models import Model
+from keras.utils import plot_model
+from torch import conv2d
+import tensorflow as tf
+import os.path
+import time
+import matlab.engine
+eng = matlab.engine.start_matlab()
+
+## how install matlab engine
+##you should have an installed matlab software please check compatibility of python and matlab version
+## https://www.mathworks.com/content/dam/mathworks/mathworks-dot-com/support/sysreq/files/python-compatibility.pdf
+## conda activate env_name
+## go to following folder (change directory of activated env)
+# cd  Matlabroot/extern/engines/python
+# python setup.py install  (in activated  env execute this)
+
+
+# L    k   n_RepDim snrd ropout     err     err_inv    
+#   
+# 32  16     2       10    0.2        5e-5    0.5 
+# 32  16     1       10    0.2        5e-5    0.5 
+# 32  16     1       10    0.5        2e-4     0.5           
+# 32  16     2       10    0.5        1e-4     0.5       
+# 32  16     2        10   0.0       5e-5    0.5 
+
+
+# L    k   n_RepDim    snrd ropout     err     err_inv    
+
+#### snr 0 
+# 32  16     1        0   0.0       0.094    0.5   
+#32  15      1        0   0.0       0.094   0.099
+#### snr 5 
+# 32  16     1        5   0.0       0.01     0.5         0.01    0.5
+#32  15      1        5   0.0      0.01      0.01      0.010    0.011
+#### snr 10 
+# 32  16     1        10   0.0       5e-5    0.5       3.8 e-5     0.5
+#32  15      1        10   0.0       2e-5    2e-5     2.8e-5       2.8 e-5
+#### snr 15 
+# 32  16     1        15   0.0       0    0.5  
+#32  15      1        15   0.0       0      0
+#### snr 20 
+# 32  16     1        10   0.0       0     0.5   
+#32  15      1        10   0.0       0     0
+
+
+import pickle
+
+
+
+# f = open('store.pckl', 'wb+')
+# pickle.dump([a1,b1], f)
+# f.seek(0)
+# obj1 = pickle.load(f)
+# f.close()
+
+
+def awgn(signal,snr):
+    sigpower=np.sum(signal*np.conj(signal))
+    sigpower=sigpower/signal.size
+    noisepower=sigpower/(math.pow(10,snr/10))
+    if(np.iscomplex(signal[0][0])):
+        noise=math.sqrt(noisepower)/np.sqrt(2)* ( (np.random.randn(signal.shape[0],signal.shape[1]))+(np.random.randn(signal.shape[0],signal.shape[1])) *1j )
+    else:
+        noise=math.sqrt(noisepower)*(np.random.randn(signal.shape[0],signal.shape[1]))
+    sig_noise=signal+noise
+    return sig_noise
+
+VarStore=[]
+Func_Name=[ 'Adamax','adam','Nadam','Adagrad','Adadelta','SGD','RMSprop','Ftrl']
+SNR_Array= range(0,16,2)
+
+if( not os.path.isfile('FileData2.txt')):
+    file2=open('FileData2.txt','w')
+    file2.close
+
+
+
+for Mode_odd in (0,1):
+    for i_CopmFun, CopmFun in enumerate(Func_Name):
+        for i_snr, SNR_in in  enumerate(SNR_Array):
+            for i_Repeat in range(1,5):
+                n_RepDim=1
+                GenData=1; ##%%% 0 use previous generated date 1 generate new
+                if(Mode_odd):
+                    L=eng.double(64); #%64; ##%Number of subcarriers  2^x
+                    K=eng.double(15);#%15; ##%Number of subsyymbols   2^t-1
+                else:
+                    L=eng.double(64); #%64; ##%Number of subcarriers  2^x
+                    K=eng.double(16);#%15; ##%Number of subsyymbols   2^t-1
+                Npac=eng.double(100); ##%number of packets data
+                if(SNR_in<5):
+                    MaxRepeat=eng.double(20)
+                elif(SNR_in<8):
+                    MaxRepeat=eng.double(100)
+                elif(SNR_in<11):
+                    MaxRepeat=eng.double(400)
+                elif(SNR_in<16):
+                    MaxRepeat=eng.double(1000)    
+                else:
+                    MaxRepeat=eng.double(1000)    
+                
+                SNR_in=eng.double(SNR_in); ##%Signal to noise ratio
+                eng.addpath("Channel_Code")
+                start_time1 = time.time()
+
+                out=eng.GenCh(GenData,L,K,Npac,MaxRepeat,SNR_in);
+
+                x_Re_Im=np.array(out['x_Re_Im'])
+                t_Re_Im=np.array(out['t_Re_Im'])
+                Ainv=np.array(out['Ainv'])
+                A=np.array(out['A'])
+                stop_time1 = time.time()
+
+                tt=0
+
+                start_time2= time.time()
+
+
+
+
+                # dim=100;
+                # nsample=1000;
+                # H=random.rand(dim,dim)+(random.rand(dim,dim))*1j
+                # xin= 2*random.randint(0,2,size=(dim,nsample))-1 + (2*random.randint(0,2,size=(dim,nsample))-1 )*1j
+                # ych_NoNoise=np.dot(H,xin)
+                # snr=20
+                # ych=awgn(ych_NoNoise,snr)
+
+                dim=int(L*K) #100;
+                nsample=int(Npac*MaxRepeat)
+                H=A #random.rand(dim,dim)+(random.rand(dim,dim))*1j
+                xin=t_Re_Im #2*random.randint(0,2,size=(dim,nsample))-1 + (2*random.randint(0,2,size=(dim,nsample))-1 )*1j
+                # ych_NoNoise= np.dot(H,xin)
+                #snr=20
+                ych=x_Re_Im#awgn(ych_NoNoise,snr)
+
+
+                ##### randomize or permutations samples
+                Ind=np.random.permutation(nsample)
+                ych_noSort=np.zeros(ych.shape).astype('complex128')
+                xin_noSort=np.zeros(xin.shape).astype('complex128')
+                for i, j1 in enumerate(Ind):
+                    ych_noSort[:,i]=ych[:,j1]
+                    xin_noSort[:,i]= xin[:,j1]
+
+                ####### divide data test train
+                perc=0.7  ### percent of train data
+                nTrain= np.floor(perc*nsample).astype('uint16')
+                xTrain= ych_noSort[:,1:nTrain]
+                yTrain=xin_noSort[:,1:nTrain]
+                xTest= ych_noSort[:,nTrain+1:]
+                yTest= xin_noSort[:,nTrain+1:]
+
+
+                ###accuracy with inverse
+                if(Mode_odd):
+                    Hinv=np.linalg.inv(H)
+                else:
+                    Hinv=np.linalg.pinv(H)
+
+                yout_inv=np.dot(Hinv,xTest)
+                # accuracy_inv=np.sum(np.equal(np.round(yout_inv),yTest))/yTest.size
+                acc_R=np.sum(np.equal(np.sign(np.real(yout_inv)),np.real(yTest)))/yTest.size
+                acc_Im=np.sum(np.equal(np.sign(np.imag(yout_inv)),np.imag(yTest)))/yTest.size
+                accuracy_inv=(acc_R+acc_Im)/2
+                print('accuracy_inv= ',accuracy_inv )
+
+                ############
+                ##########################reshape for image input  (numsample,channel,row, clmn )
+                xTrain=np.transpose(xTrain).reshape(xTrain.shape[1],1,dim,1);
+                xTest=np.transpose(xTest).reshape(xTest.shape[1],1,dim,1);
+                yTrain=np.transpose(yTrain)
+                yTest=np.transpose(yTest)
+                #######
+                # print(xin)
+                # print(H)
+                # print(H.shape)
+                # # create model sequential
+                # model = Sequential()
+                # model.add(Conv2D(dim, (1,dim), input_shape=(1, dim, 1),activation='linear', name='layer1Conv'))
+                # model.add(Flatten( name='layer2Flat'))
+                # model.add(Dense(dim, activation='linear',name='layer3FC'))#'sigmoid'))  #'softmax'
+
+                Input_real=Input(shape=(1,dim,1)) #R1
+                Input_Im=Input(shape=(1,dim,1))#Im1
+
+                C2D_Re= Conv2D(n_RepDim*dim,(1,dim),activation='linear', name='C2DReal') # R2
+                # cc=Conv2D(filters=64, kernel_size=(3,3), input_shape=(50, 50, 1),  activation="relu")
+                C2D_Im= Conv2D(n_RepDim*dim,(1,dim),activation='linear',name='C2DIm') #Im2
+                # (R1+jIm1)*(R2+JIm2)= (R1*R2-Im1*Im2)+j(R1* Im2+Im1 *R2)
+                R1_R2=C2D_Re(Input_real)
+                R1_Im2=C2D_Im(Input_real)
+                Im1_R2=C2D_Re(Input_Im)
+                Im1_Im2=C2D_Im(Input_Im)
+
+                # R1_R2=Dropout(0.2)(R1_R2)
+                # Im1_Im2=Dropout(0.2)(Im1_Im2)
+                # R1_Im2=Dropout(0.2)(R1_Im2)
+                # Im1_R2=Dropout(0.2)(Im1_R2)
+
+                subtracted = Subtract()([R1_R2, Im1_Im2])
+                added=add([R1_Im2, Im1_R2])
+
+
+                # added=Dropout(0.5)(added)
+                # subtracted=Dropout(0.5)(subtracted)
+
+
+                subt_Flat=Flatten()(subtracted)
+                Add_Flat=Flatten()(added)
+                out_R=Dense(dim,activation='linear',name='FC_outR')(subt_Flat)
+                out_Im=Dense(dim,activation='linear',name='FC_outIm')(Add_Flat)
+                # out_R=Dense(dim,activation='linear',name='FC_outR0')(out_R0)
+                # out_Im=Dense(dim,activation='linear',name='FC_outIm0')(out_Im0)
+                model=Model(inputs=[Input_real,Input_Im],outputs=[out_R,out_Im])
+
+                # # summarize layers
+                # print(model.summary())
+                # # plot graph
+                # plot_model(model, to_file='multilayer_perceptron_graph.png')
+
+                ##################################################################
+                #############################Test with one sample #################
+                # xx=np.array([[  1],
+                # [14],
+                # [7]])
+                # ychxx= np.dot(H,xx)
+                # xTestxx=np.transpose(ychxx).reshape(1,1,dim,1);
+                # youtxx=model.predict([xTestxx,xTestxx])
+                #####################################################
+                #####################################################
+
+
+                #########Set weights
+                # #### prepare weights
+                Hinv=np.linalg.inv(H)
+                Hinv_T=np.transpose(Hinv)
+
+                # ##Setting new weights and biases
+                # for i, layer in enumerate(model.layers):
+                #     if layer.name=='C2DReal' :
+                #         Weight = np.array(np.real(Hinv_T))
+                #         Weight=np.array(np.tile(Weight,[n_RepDim,1]))
+                #         Weight=Weight.reshape(layer.get_weights()[0].shape)
+                #         layer.set_weights([Weight, np.zeros(layer.get_weights()[1].shape)])
+                #     if layer.name=='C2DIm' :
+                #         Weight = np.imag(Hinv_T)
+                #         Weight=np.array(np.tile(Weight,[n_RepDim,1]))
+                #         Weight=Weight.reshape(layer.get_weights()[0].shape)
+                #         layer.set_weights([Weight, np.zeros(layer.get_weights()[1].shape)])
+                #     if layer.name=='FC_outR' or  layer.name=='FC_outIm':
+                #         Weight = np.eye(layer.get_weights()[0].shape[0],layer.get_weights()[0].shape[1])
+                #         layer.set_weights([Weight, np.zeros(layer.get_weights()[1].shape)])
+
+
+
+
+
+                # for lys in model.layers:
+                #     print(lys.name,'/n')
+                #     print('wheight')
+                #     L=lys.get_weights()
+                #     try:
+                #         lys.get_weights()[0]
+                #         print("shape",lys.get_weights()[0].shape)
+                #         print(lys.get_weights()[0])
+                #         print('Bias')
+                #         print(lys.get_weights()[1])
+                #     except:
+                #         continue
+                ##################################################################
+                #############################Test with one sample #################
+                # xx=np.array([[  1],
+                # [14],
+                # [7]])
+                # ychxx= np.dot(H,xx)
+                # xTestxx=np.transpose(ychxx).reshape(1,1,dim,1);
+                # youtxx=model.predict(xTestxx)
+                #####################################################
+                #####################################################
+                # Compile model
+                model.compile(optimizer=CopmFun,loss='mse',metrics=['MeanSquaredError']) ### nadam   0.001  #adam 0.02
+
+                    # SGD  0.01
+                    # RMSprop 0.03
+                    # Adam
+                    # Adadelta  0.5
+                    # Adagrad  0.17
+                    # Adamax 0.001
+                    # Nadam 0.001
+                    # Ftrl  0.8
+
+                ##model.compile(optimizer='rmsprop',loss='binary_crossentropy',metrics=['accuracy']) ## for multi class  loss='categorical_crossentropy'
+                # This builds the model for the first time:
+
+                model.fit([np.real(xTrain),np.imag(xTrain)],[np.real(yTrain),np.imag(yTrain)],batch_size=dim, epochs=50, verbose=0)
+
+                # for lys in model.layers:
+                #     print(lys.name,'/n')
+                #     print('wheight')
+                #     L=lys.get_weights()
+                #     try:
+                #         lys.get_weights()[0]
+                #         print("shape",lys.get_weights()[0].shape)
+                #         print(lys.get_weights()[0])
+                #         print('Bias')
+                #         print(lys.get_weights()[1])
+                #     except:
+                #         continue
+
+
+                # accuracyr = model.evaluate([np.real(xTrain),np.imag(xTrain)] ,[np.real(yTrain),np.imag(yTrain)], verbose=0)
+                yout1, yout2=model.predict([np.real(xTest),np.imag(xTest)])
+                acc_R=np.sum(np.equal(np.sign(yout1),np.real(yTest)))/yTest.size 
+                acc_Im=np.sum(np.equal(np.sign(yout2),np.imag(yTest)))/yTest.size 
+                accuracy=(acc_R+acc_Im)/2
+                stop_time2 = time.time()
+                print(stop_time1-start_time1)
+                print(stop_time2-start_time2)
+
+                # print('accuracy=', accuracy)
+                # print('accuracy_inv= ',accuracy_inv )
+                error1=1-accuracy
+                error_inv1=1-accuracy_inv
+                print('error=',1-accuracy)
+                print('errot_inv=',1-accuracy_inv)
+                cc=[i_Repeat,SNR_in,error1,error_inv1,L,K, Mode_odd, CopmFun]
+                VarStore.append(cc)
+                with open('FileData1.txt','wb+') as file1:
+                    pickle.dump(VarStore, file1)
+
+                with open('FileData2.txt','a+') as file2:
+                    D_temp=(",".join(str(item) for item in VarStore)
+                    file2.write('/n')
+                    file2.write(D_temp)
+                print(cc)
+# file1.close()
+# file2.close()
+
+tt=0;
